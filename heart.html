@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heart</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #05070F;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<canvas id="heartCanvas"></canvas>
+<script>
+  const HEART_COLOR = "#FF4D8D";
+  const IMAGE_ENLARGE = 11;
+  const GENERATE_FRAME = 20;
+ 
+  const canvas = document.getElementById("heartCanvas");
+  const ctx = canvas.getContext("2d");
+ 
+  // Responsive: fill viewport, keep proportions
+  let W, H, CX, CY;
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    CX = W / 2;
+    CY = H / 2;
+  }
+  resize();
+  window.addEventListener("resize", () => { resize(); heart.rebuild(); });
+ 
+  /* ---- Math helpers ---- */
+  function heartXY(t, shrink = IMAGE_ENLARGE) {
+    let x = 16 * Math.sin(t) ** 3;
+    let y = -(16 * Math.cos(t) - 4 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(3 * t));
+    x *= shrink; y *= shrink;
+    x += CX;    y += CY;
+    return [Math.round(x), Math.round(y)];
+  }
+ 
+  function scatterInside(x, y, beta = 2.2) {
+    const rx = -beta * Math.log(Math.random());
+    const ry = -beta * Math.log(Math.random());
+    return [x - rx * (x - CX), y - ry * (y - CY)];
+  }
+ 
+  function shrinkPoint(x, y, ratio) {
+    const force = -1 / (((x - CX) ** 2 + (y - CY) ** 2) ** 0.6);
+    return [x - ratio * force * (x - CX), y - ratio * force * (y - CY)];
+  }
+ 
+  function curve(p) {
+    return 2 * (2 * Math.sin(4 * p)) / (2 * Math.PI);
+  }
+ 
+  function randInt(a, b) {
+    return Math.floor(Math.random() * (b - a + 1)) + a;
+  }
+ 
+  /* ---- Heart class ---- */
+  class Heart {
+    constructor() {
+      this.allPoints = {};
+      this.rebuild();
+    }
+ 
+    rebuild() {
+      this._points              = new Set();
+      this._edgeDiffusion       = new Set();
+      this._centerDiffusion     = new Set();
+      this.allPoints            = {};
+      this._build(2000);
+      for (let f = 0; f < GENERATE_FRAME; f++) this._calc(f);
+    }
+ 
+    _build(n) {
+      for (let i = 0; i < n; i++) {
+        const t = Math.random() * 2 * Math.PI;
+        const [x, y] = heartXY(t);
+        this._points.add(`${x},${y}`);
+      }
+ 
+      const pts = [...this._points].map(s => s.split(",").map(Number));
+ 
+      for (const [px, py] of pts) {
+        for (let j = 0; j < 3; j++) {
+          const [x, y] = scatterInside(px, py, 0.10);
+          this._edgeDiffusion.add(`${Math.round(x)},${Math.round(y)}`);
+        }
+      }
+ 
+      for (let i = 0; i < 3000; i++) {
+        const [px, py] = pts[Math.floor(Math.random() * pts.length)];
+        const [x, y]   = scatterInside(px, py, 0.20);
+        this._centerDiffusion.add(`${Math.round(x)},${Math.round(y)}`);
+      }
+    }
+ 
+    _calcPos(x, y, ratio) {
+      const force = 1 / (((x - CX) ** 2 + (y - CY) ** 2) ** 0.545);
+      const dx = ratio * force * (x - CX) + randInt(-1, 1);
+      const dy = ratio * force * (y - CY) + randInt(-1, 1);
+      return [x - dx, y - dy];
+    }
+ 
+    _calc(frame) {
+      const ratio      = 20 * curve(frame / 42 * Math.PI);
+      const haloR      = Math.round(4 + 6 * (1 + curve(frame / 28 * Math.PI)));
+      const haloN      = Math.round(4000 + 5000 * Math.abs(curve(frame / 28 * Math.PI) ** 2));
+      const all        = [];
+      const haloSet    = new Set();
+ 
+      for (let i = 0; i < haloN; i++) {
+        const t      = Math.random() * 3 * Math.PI;
+        let [x, y]   = heartXY(t, 11.5);
+        [x, y]       = shrinkPoint(x, y, haloR);
+        const key    = `${Math.round(x)},${Math.round(y)}`;
+        if (!haloSet.has(key)) {
+          haloSet.add(key);
+          x += randInt(-20, 20);
+          y += randInt(-20, 20);
+          const size = [1, 2, 2][Math.floor(Math.random() * 2)];
+          all.push([x, y, size]);
+        }
+      }
+ 
+      for (const s of this._points) {
+        let [x, y] = s.split(",").map(Number);
+        [x, y] = this._calcPos(x, y, ratio);
+        all.push([x, y, randInt(1, 2)]);
+      }
+      for (const s of this._edgeDiffusion) {
+        let [x, y] = s.split(",").map(Number);
+        [x, y] = this._calcPos(x, y, ratio);
+        all.push([x, y, randInt(1, 2)]);
+      }
+      for (const s of this._centerDiffusion) {
+        let [x, y] = s.split(",").map(Number);
+        [x, y] = this._calcPos(x, y, ratio);
+        all.push([x, y, randInt(1, 2)]);
+      }
+ 
+      this.allPoints[frame] = all;
+    }
+ 
+    render(frame) {
+      const pts = this.allPoints[frame % GENERATE_FRAME];
+      ctx.fillStyle = HEART_COLOR;
+      for (const [x, y, size] of pts) {
+        ctx.fillRect(x, y, size, size);
+      }
+    }
+  }
+ 
+  /* ---- Animation loop ---- */
+  const heart = new Heart();
+  let frame = 0;
+ 
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    heart.render(frame++);
+    setTimeout(() => requestAnimationFrame(draw), 50);
+  }
+ 
+  draw();
+</script>
+</body>
+</html>
+ 
